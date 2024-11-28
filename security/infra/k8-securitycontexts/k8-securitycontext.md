@@ -18,3 +18,19 @@ spec:
 - ```runAsUser: 1000```: Specifies that the container should run as a user with UID 1000 (non-root). If the application needs specific permissions, you can define which user it should run as.
 - ```runAsGroup: 3000```: Specifies the group ID (GID) under which the container should run.
 - ```fsGroup: 2000```: Defines the group ID that will be applied to any volumes mounted by the pod. This ensures that files within volumes have the correct group ownership.
+
+```yaml
+containers:
+- name: app
+  image: secure-app:latest
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+```
+
+- ```allowPrivilegeEscalation: false```: Prevents the container from escalating its privileges (e.g., running as root). This ensures that the container cannot gain additional privileges during runtime.
+- ```capabilities.drop: [ALL]```: Drops all Linux capabilities, further restricting the container's access to sensitive system operations. This minimizes the potential attack surface by ensuring the container has only the essential capabilities needed to run the application.
+
+
