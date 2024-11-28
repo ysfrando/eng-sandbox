@@ -34,3 +34,30 @@ containers:
 - ```capabilities.drop: [ALL]```: Drops all Linux capabilities, further restricting the container's access to sensitive system operations. This minimizes the potential attack surface by ensuring the container has only the essential capabilities needed to run the application.
 
 
+## admissionController.yaml
+
+This component is an **Admission Controller Policy** managed by Open Policy Agent (OPA) and Gatekeeper, which is used to enforce certain security standards at the time of pod creation in the Kubernetes cluster. In your case, the policy ensures that all pods must run as non-root.
+
+```yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireNonRoot
+metadata:
+  name: require-non-root
+spec:
+  match:
+    kinds:
+    - apiGroups: [""]
+      kinds: ["Pod"]
+```
+
+- ```K8sRequireNonRoot```: This policy ensures that any pod created must run as a non-root user.
+- ```match.kinds```: Specifies that this policy applies to the "Pod" kind (which includes both deployments and standalone pods).
+- ```apiGroups: [""]```: Indicates that the policy applies to resources in the core API group (i.e., Pod is part of the core group).
+
+When this policy is enforced by Gatekeeper, any pod creation that violates the rule (e.g., if a pod runs as root) will be rejected, ensuring all workloads are secured by not allowing them to run with elevated privileges.
+
+### How It All Works Together:
+**1.** The Deployment specifies that containers should run as non-root users and limits the capabilities of the containers for enhanced security.
+**2.** The Gatekeeper Admission Controller enforces the rule that all Pods must be configured to run as non-root users.
+**3. **This setup ensures that if any container in the cluster is improperly configured to run as root, the Admission Controller will block it.
+
