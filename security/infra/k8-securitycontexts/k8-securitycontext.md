@@ -61,5 +61,5 @@ When this policy is enforced by Gatekeeper, any pod creation that violates the r
 
 **2.** The Gatekeeper Admission Controller enforces the rule that all Pods must be configured to run as non-root users.
 
-**3. **This setup ensures that if any container in the cluster is improperly configured to run as root, the Admission Controller will block it.
+**3.** This setup ensures that if any container in the cluster is improperly configured to run as root, the Admission Controller will block it.
 
