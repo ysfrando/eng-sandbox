@@ -1,1 +1,76 @@
+# GitLab CI/CD Pipeline Configuration with Security Controls
+stages:
+  - verify
+  - build
+  - sign
+  - deploy
 
+variables:
+  COSIGN_KEY: ${COSIGN_KEY_SECRET}
+  VAULT_ADDR: "https://vault.internal.uber.com"
+
+# Verify source code integrity
+source-verify:
+  stage: verify
+  script:
+    - |
+      # Verify Git commits are signed
+      git verify-commit HEAD
+      
+      # Check dependencies against known-good lockfiles
+      sha256sum --check dependencies.sha256
+      
+      # SBOM generation
+      syft packages ${CI_PROJECT_DIR} -o spdx-json > sbom.json
+      
+      # Vulnerability scanning
+      grype sbom:./sbom.json --fail-on high
+
+# Secure build process
+secure-build:
+  stage: build
+  script:
+    - |
+      # Use hermetic builder
+      buildctl build \
+        --frontend=dockerfile.v0 \
+        --local context=. \
+        --local dockerfile=. \
+        --output type=image,name=${IMAGE_NAME},push=false \
+        --metadata-file metadata.json
+        
+      # Generate provenance
+      slsa-generator generate \
+        --predicate-type slsaprovenance/v1 \
+        --artifact ${IMAGE_NAME} \
+        --metadata metadata.json
+
+# Sign artifacts
+sign-artifacts:
+  stage: sign
+  script:
+    - |
+      # Sign container image
+      cosign sign --key ${COSIGN_KEY} ${IMAGE_NAME}
+      
+      # Sign SBOM
+      cosign sign-blob --key ${COSIGN_KEY} sbom.json
+      
+      # Sign provenance
+      cosign sign-blob --key ${COSIGN_KEY} provenance.json
+
+# Policy enforcement
+deploy-with-verification:
+  stage: deploy
+  script:
+    - |
+      # Verify signatures before deployment
+      cosign verify ${IMAGE_NAME}
+      
+      # Check policy compliance
+      conftest test \
+        --policy opa/deploy-policy.rego \
+        --input provenance.json
+        
+      # Deploy if all checks pass
+      kubectl apply -f k8s/
