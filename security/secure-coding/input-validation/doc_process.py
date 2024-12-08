@@ -1,3 +1,9 @@
+"""
+You're working on a document processing service that accepts text submissions from users. 
+A teammate has implemented client-side validation using JavaScript to check document size and content type before upload. 
+During the security review, you notice this could be problematic. What's the security concern, and how should this be properly implemented?
+"""
+
 from typing import Optional
 import chardet
 from dataclasses import dataclass
