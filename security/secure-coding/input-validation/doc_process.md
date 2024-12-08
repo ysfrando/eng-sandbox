@@ -1,4 +1,4 @@
-# Secure Validation Principles in python```doc_process.py```
+# Secure Validation Principles in ```doc_process.py```
 
 ## 1. **Server-side Validation**
 The secure implementation moves all validation to the server side. Client-side validation can be easily bypassed using tools like browser dev tools or API clients, so it should never be the only validation layer.
