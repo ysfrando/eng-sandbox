@@ -1,0 +1,249 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: envoy-config
+data:
+  envoy.yaml: |
+    admin:
+      access_log_path: /tmp/admin_access.log
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 9901
+
+    static_resources:
+      listeners:
+      - name: listener_0
+        address:
+          socket_address:
+            address: 0.0.0.0
+            port_value: 9211
+        filter_chains:
+        - filters:
+          - name: envoy.filters.network.http_connection_manager
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+              stat_prefix: ingress_http
+              codec_type: AUTO
+              route_config:
+                name: local_route
+                virtual_hosts:
+                - name: local_service
+                  domains: ["*"]
+                  routes:
+                  - match:
+                      prefix: "/"
+                    route:
+                      cluster: local_service
+                      timeout: 0s
+              http_filters:
+              - name: envoy.filters.http.router
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              require_client_certificate: true
+              common_tls_context:
+                tls_certificates:
+                - certificate_chain:
+                    filename: "/etc/envoy-proxy/tls/tls.crt"
+                  private_key:
+                    filename: "/etc/envoy-proxy/tls/tls.key"
+                validation_context:
+                  trusted_ca:
+                    filename: "/etc/envoy-proxy/tls/ca.crt"
+
+      clusters:
+      - name: local_service
+        connect_timeout: 0.25s
+        type: STRICT_DNS
+        lb_policy: ROUND_ROBIN
+        load_assignment:
+          cluster_name: local_service
+          endpoints:
+          - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 127.0.0.1
+                    port_value: 8080
+        transport_socket:
+          name: envoy.transport_sockets.tls
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+            common_tls_context:
+              tls_certificates:
+              - certificate_chain:
+                  filename: "/etc/envoy-proxy/tls/tls.crt"
+                private_key:
+                  filename: "/etc/envoy-proxy/tls/tls.key"
+              validation_context:
+                trusted_ca:
+                  filename: "/etc/envoy-proxy/tls/ca.crt"
+EOF
+
+# 4. AWS ECS Task Definition with Envoy Sidecar
+# --------------------------------------------
+
+cat > ecs-task-definition.json << EOF
+{
+  "family": "service-with-mtls",
+  "networkMode": "awsvpc",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::123456789012:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "app-image:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/service-with-mtls",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "app"
+        }
+      },
+      "environment": [
+        {
+          "name": "GRPC_GO_LOG_VERBOSITY_LEVEL",
+          "value": "99"
+        },
+        {
+          "name": "GRPC_GO_LOG_SEVERITY_LEVEL",
+          "value": "info"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "SOME_SECRET",
+          "valueFrom": "arn:aws:ssm:us-west-2:123456789012:parameter/app/some-secret"
+        }
+      ],
+      "dependsOn": [
+        {
+          "containerName": "envoy-sidecar",
+          "condition": "HEALTHY"
+        }
+      ]
+    },
+    {
+      "name": "envoy-sidecar",
+      "image": "envoyproxy/envoy:v1.22.0",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 9211,
+          "hostPort": 9211,
+          "protocol": "tcp"
+        },
+        {
+          "containerPort": 9901,
+          "hostPort": 9901,
+          "protocol": "tcp"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -s http://localhost:9901/ready || exit 1"
+        ],
+        "interval": 5,
+        "timeout": 2,
+        "retries": 3,
+        "startPeriod": 10
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/service-with-mtls",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "envoy"
+        }
+      },
+      "mountPoints": [
+        {
+          "sourceVolume": "envoy-config",
+          "containerPath": "/etc/envoy/envoy.yaml",
+          "readOnly": true
+        },
+        {
+          "sourceVolume": "certificates",
+          "containerPath": "/etc/envoy-proxy/tls",
+          "readOnly": true
+        }
+      ],
+      "command": [
+        "envoy",
+        "-c",
+        "/etc/envoy/envoy.yaml",
+        "--service-cluster",
+        "service-mesh",
+        "--service-node",
+        "service-with-mtls",
+        "-l",
+        "info"
+      ]
+    },
+    {
+      "name": "cert-manager",
+      "image": "amazon/aws-cli:latest",
+      "essential": false,
+      "command": [
+        "sh",
+        "-c",
+        "aws secretsmanager get-secret-value --secret-id service-certs --query SecretString --output text > /tmp/certs.json && cat /tmp/certs.json | jq -r '.ca_crt' > /certs/ca.crt && cat /tmp/certs.json | jq -r '.tls_crt' > /certs/tls.crt && cat /tmp/certs.json | jq -r '.tls_key' > /certs/tls.key && chmod 444 /certs/*"
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/service-with-mtls",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "cert-manager"
+        }
+      },
+      "mountPoints": [
+        {
+          "sourceVolume": "certificates",
+          "containerPath": "/certs"
+        }
+      ]
+    }
+  ],
+  "volumes": [
+    {
+      "name": "envoy-config",
+      "dockerVolumeConfiguration": {
+        "scope": "task",
+        "driver": "local",
+        "labels": {
+          "purpose": "envoy-config"
+        }
+      }
+    },
+    {
+      "name": "certificates",
+      "dockerVolumeConfiguration": {
+        "scope": "task",
+        "driver": "local",
+        "labels": {
+          "purpose": "certificates"
+        }
+      }
+    }
+  ],
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "1024",
+  "memory": "2048"
+}
