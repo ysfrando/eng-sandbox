@@ -1,0 +1,22 @@
+"""
+Content Security Policy (CSP) is a browser security control that mainly focuses on preventing arbitrary script execution 
+(e.g, XSS) within a users browser. The CSP details the paths and sources from which resources (e.g, scripts, code, images)
+can be loaded
+
+The CSP is often defined on a website either through HTTP Response Headers or within HTML code of the site
+
+Common CSP Directives: 
+1. default-src: Defines the default policy for all content types unless specified otherwise e.g, default-src 'self';
+2. script-src: Defines the sources from which JavaScript can be loaded e.g, script-src https://static.cdninstagram.com;
+3. style-src: Defines valid source for loading stylesheets e.g, style-src https://static.cdninstagram.com;
+4. img-src: Defines valid sources for loading images e.g, img-src https://images.cdninstagram.com;
+
+Common CSP Sources:
+1. *: Allows all sources to load resources except a few
+2. 'self': Allows loading of resources from the same domain/origin
+3. 'data': Allows loading of resources via the data scheme
+4. https://...: Allows loading of resources from a specific origin
+5. 'none': Blocks loading of resources from any origin
+"""
+
+Content-Security-Policy: default-src 'self'; script-src: 'self' https://static.cdninstagram.com; object-src: 'none';

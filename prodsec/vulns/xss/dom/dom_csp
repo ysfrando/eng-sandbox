@@ -1,1 +1,0 @@
-Content-Security-Policy: default-src 'self'; script-src: 'self' https://static.cdninstagram.com; object-src: 'none';
