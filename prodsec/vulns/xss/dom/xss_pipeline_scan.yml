@@ -1,0 +1,10 @@
+dom_xss_scan:
+  stage: security_testing
+  script: 
+    - npm install @appsec/dom-xss-scanner
+    - python3 ./scripts/dom_xss_scan.py --target ./web-client
+  artifacts:
+    paths:
+      - dom-xss-report.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "main"
